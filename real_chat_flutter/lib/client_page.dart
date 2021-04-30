@@ -1,25 +1,29 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_socket_io/flutter_socket_io.dart';
 import 'package:flutter_socket_io/socket_io_manager.dart';
 
-class ChatPage extends StatefulWidget {
+class ClientPage extends StatefulWidget {
+  final String name;
+
+  const ClientPage({Key key, @required this.name}) : super(key: key);
   @override
-  _ChatPageState createState() => _ChatPageState();
+  _ClientPageState createState() => _ClientPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ClientPageState extends State<ClientPage> {
   SocketIO socketIO;
-  List<String> messages;
+  List<String> requests;
   double height, width;
   TextEditingController textController;
   ScrollController scrollController;
-
+  bool joined;
+  final kMidnight = Color(0xff000033);
+  final kBlue1 = Color(0xff3549B8);
   @override
   void initState() {
     //Initializing the message list
-    messages = List<String>();
+    requests = List<String>();
     //Initializing the TextEditingController and ScrollController
     textController = TextEditingController();
     scrollController = ScrollController();
@@ -33,17 +37,39 @@ class _ChatPageState extends State<ChatPage> {
     //Subscribe to an event to listen to
     socketIO.subscribe('receive_message', (jsonData) {
       //Convert the JSON data received into a Map
-      Map<String, dynamic> data = json.decode(jsonData);
-      this.setState(() => messages.add(data['message']));
+      // Map<String, dynamic> data = json.decode(jsonData);
+      // this.setState(() => requests.add(data['message']));
+      this.setState(() => requests.add(jsonData));
       scrollController.animateTo(
         scrollController.position.maxScrollExtent,
         duration: Duration(milliseconds: 600),
         curve: Curves.ease,
       );
     });
-    //Connect to the socket
-    socketIO.connect();
+    socketIO.subscribe("vendor-accept-request", (jsonData) {
+      print(jsonData);
+      Map<String, dynamic> data = json.decode(jsonData);
+
+      this.setState(() => requests.add(data['name'] + "-> Has accepted"));
+      scrollController.animateTo(
+        scrollController.position.maxScrollExtent,
+        duration: Duration(milliseconds: 600),
+        curve: Curves.ease,
+      );
+    });
+
+    joined = false;
+    joinClient();
     super.initState();
+  }
+
+  Future<void> joinClient() async {
+    await socketIO.connect();
+    print(joined);
+    if (joined) return;
+    await socketIO.sendMessage(
+        "client-join", json.encode({'name': widget.name}));
+    joined = true;
   }
 
   Widget buildSingleMessage(int index) {
@@ -53,11 +79,11 @@ class _ChatPageState extends State<ChatPage> {
         padding: const EdgeInsets.all(20.0),
         margin: const EdgeInsets.only(bottom: 20.0, left: 20.0),
         decoration: BoxDecoration(
-          color: Colors.deepPurple,
+          color: Colors.indigo[600],
           borderRadius: BorderRadius.circular(20.0),
         ),
         child: Text(
-          messages[index],
+          requests[index],
           style: TextStyle(color: Colors.white, fontSize: 15.0),
         ),
       ),
@@ -66,11 +92,11 @@ class _ChatPageState extends State<ChatPage> {
 
   Widget buildMessageList() {
     return Container(
-      height: height * 0.8,
+      height: height * 0.7,
       width: width,
       child: ListView.builder(
         controller: scrollController,
-        itemCount: messages.length,
+        itemCount: requests.length,
         itemBuilder: (BuildContext context, int index) {
           return buildSingleMessage(index);
         },
@@ -80,12 +106,12 @@ class _ChatPageState extends State<ChatPage> {
 
   Widget buildChatInput() {
     return Container(
-      width: width * 0.7,
+      width: width * 0.5,
       padding: const EdgeInsets.all(2.0),
       margin: const EdgeInsets.only(left: 40.0),
       child: TextField(
         decoration: InputDecoration.collapsed(
-          hintText: 'Send a message...',
+          hintText: 'Write Anything...',
         ),
         controller: textController,
       ),
@@ -93,16 +119,15 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget buildSendButton() {
-    return FloatingActionButton(
-      backgroundColor: Colors.deepPurple,
-      onPressed: () {
-        //Check if the textfield has text or not
+    return InkWell(
+      onTap: () {
         if (textController.text.isNotEmpty) {
-          //Send the message as JSON data to send_message event
           socketIO.sendMessage(
-              'send_message', json.encode({'message': textController.text}));
+              "client-join", json.encode({'name': widget.name}));
+          socketIO.sendMessage(
+              "user-request", json.encode({'name': textController.text}));
           //Add the message to the list
-          this.setState(() => messages.add(textController.text));
+          this.setState(() => requests.add(textController.text));
           textController.text = '';
           //Scrolldown the list to show the latest message
           scrollController.animateTo(
@@ -112,9 +137,27 @@ class _ChatPageState extends State<ChatPage> {
           );
         }
       },
-      child: Icon(
-        Icons.send,
-        size: 30,
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(5),
+          gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                kMidnight,
+                kBlue1,
+              ]),
+        ),
+        child: Text(
+          "Send Request",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w500,
+            color: Colors.grey[400],
+          ),
+        ),
       ),
     );
   }
@@ -122,10 +165,13 @@ class _ChatPageState extends State<ChatPage> {
   Widget buildInputArea() {
     return Container(
       height: height * 0.1,
-      width: width,
-      child: Row(
+      width: width * 0.5,
+      child: Column(
         children: <Widget>[
           buildChatInput(),
+          SizedBox(
+            height: 10,
+          ),
           buildSendButton(),
         ],
       ),
@@ -137,13 +183,22 @@ class _ChatPageState extends State<ChatPage> {
     height = MediaQuery.of(context).size.height;
     width = MediaQuery.of(context).size.width;
     return Scaffold(
-      body: SingleChildScrollView(
-        child: Column(
-          children: <Widget>[
-            SizedBox(height: height * 0.1),
-            buildMessageList(),
-            buildInputArea(),
-          ],
+      backgroundColor: Colors.indigo[50],
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: <Widget>[
+              SizedBox(height: height * 0.01),
+              Text("Client",
+                  style: TextStyle(
+                      color: Colors.blueGrey[800],
+                      fontSize: 25.0,
+                      fontWeight: FontWeight.w500)),
+              SizedBox(height: height * 0.03),
+              buildMessageList(),
+              buildInputArea(),
+            ],
+          ),
         ),
       ),
     );
